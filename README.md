@@ -1,6 +1,6 @@
 # Airflow-helpdesk
 
-<p align='center'><img width="700" alt="pipeline" src="https://imgur.com/vUTpcZ7f"></p>
+<p align='center'><img width="700" alt="pipeline" src="https://i.imgur.com/OAmJFQM.png"></p>
 
 ## Introduction 🙋
 
