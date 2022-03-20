@@ -1,18 +1,18 @@
 # Airflow-helpdesk
 
-<p align='center'><img width="700" alt="pipeline" src="https://i.imgur.com/OAmJFQM.png"></p>
+<p align='center'><img width="700" alt="pipeline" src="https://imgur.com/IbLLpQR.png"></p>
 
 ## Introduction 🙋
 
 - Github의 issue 데이터가 발생할 때마다 데이터 레이크 Tier1에 적재하는 Webhook이 실행되기 이전의 데이터를 REST API를 통해 받아옵니다.
 - 데이터 레이크 Tier1의 데이터를 daily 데이터 레이크 Tier2에 csv형태로 변환하여 저장합니다.
-- 데이터 레이크 Tier2의 csv데이터를 daily 데이터 웨어하우스에 적재합니다.
+- 데이터 레이크 Tier2의 csv데이터를 daily 데이터베이스에 적재합니다.
 
 ## Tools 🛠
 
 - **Data Lake**: `AWS S3`
 - **ETL pipeline**: `Airflow`
-- **Data Warehouse**: `Postgresql`
+- **Database**: `AWS RDS`
 
 ## Python files 🗂
 ### Dags
