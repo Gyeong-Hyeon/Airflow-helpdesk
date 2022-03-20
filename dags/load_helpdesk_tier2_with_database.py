@@ -1,3 +1,8 @@
+"""
+데이터레이크 Tier 1 에 저장되 데이터를 
+데이터레이크 Tier 2 와 데이터베이스에 저장합니다.
+"""
+
 import json
 from datetime import datetime, timedelta
 
@@ -12,7 +17,7 @@ from helpdesk_tier2_s3_utils import read_tier1_response, read_tier2_data, load_c
 
 dag_params = {
     'dag_id': 'load_helpdesk_tier2_with_database',
-    'start_date': datetime(2021,8,17),
+    'start_date': datetime(2020,9,2),
     'schedule_interval': '@daily',
     'catchup' : True,
     'params': {
@@ -38,7 +43,9 @@ with DAG(**dag_params) as dag:
         csv_data = read_tier1_response(year, month, day, 'issue', column)
         
         if csv_data == None:
-            return f"No Helpdesk Question CSV File in DataLake Tier1. : {year}/{month}/{day}"
+            print(f"No Helpdesk Question CSV File in DataLake Tier1. : {year}/{month}/{day}")
+            raise Exception
+            
 
         s3_key = f'aib-db/TSA_QUES_HI/{year}/{month}/{day}/{year}-{month}-{day}.csv'
         load_csv_tier2(s3_key, csv_data)
@@ -104,3 +111,4 @@ with DAG(**dag_params) as dag:
     )
 
     load_hd_data_to_tier2 >> insert_hd_data_to_aib_db
+    
