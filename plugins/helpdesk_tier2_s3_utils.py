@@ -1,61 +1,113 @@
-import csv
+"""
+데이터레이크 Tier 1 에 저장되 데이터를 
+데이터레이크 Tier 2 와 데이터베이스에 저장합니다.
+"""
+
 import json
-from io import StringIO
+from datetime import datetime, timedelta
 
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
-from helpdesk_database_utils import get_pk_value
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from datahub_provider.entities import Dataset
 
-TIER1_BUCKET = "datalake-tier1-raw"
-TIER2_BUCKET = "datalake-tier2-staging"
-S3_HOOK = S3Hook(aws_conn_id='airflow_aws_conn')
+from helpdesk_database_utils import insert_csv_to_database
+from helpdesk_tier2_s3_utils import read_tier1_response, read_tier2_data, load_csv_tier2
 
-def read_tier1_response(year, month, day, schema, csv_data) -> dict():
-    """
-    전달받을 날짜에 제출된 객체들을 데이터레이크 Tier1 에서 읽어옵니다.
-    """
-    prefix_key = f"aib/help-desk/{schema}/{year}/{month}/{day}"
-    list_keys = S3_HOOK.list_keys(bucket_name=TIER1_BUCKET, prefix=prefix_key)
-   
-    if not list_keys:
-        status_code, result = 204, f"No data to be loaded on {year}-{month}-{day}"
-        return None
+
+dag_params = {
+    'dag_id': 'load_helpdesk_tier2_with_database',
+    'start_date': datetime(2020,9,2),
+    'schedule_interval': '@daily',
+    'catchup' : True,
+    'params': {
+        'retries' : 2,
+        'retry_delay' : timedelta(seconds=2)
+    },
+    'tags':['Help Desk','Tier2','datalake'],
+    'default_args':{'owner':'Gyeong-Hyeon'}
+}
+
+with DAG(**dag_params) as dag:
+
+    def _load_helpdesk_question_to_tier2(**context):
+        """
+        tier1의 json 데이터를 읽어 파싱 후 csv로 변환하여 tier2에 저장하는 함수입니다.
+        - hd : 헬프데스크
+        파일명: s3://datalake-tier2-staging/{데이터 형식}/{팀 명칭}/{세부분류}/{날짜}/{세부 명칭}
+        """
+
+        date = context['templates_dict']['prev_execution_date']
+        year, month, day = date[0:4], date[5:7], date[8:10]
+        column = [['individual_id','type_tool_id','question_body','created_at','updated_at']]
+        csv_data = read_tier1_response(year, month, day, 'issue', column)
+        
+        if csv_data == None:
+            print(f"No Helpdesk Question CSV File in DataLake Tier1. : {year}/{month}/{day}")
+            raise Exception
+            
+
+        s3_key = f'aib-db/TSA_QUES_HI/{year}/{month}/{day}/{year}-{month}-{day}.csv'
+        load_csv_tier2(s3_key, csv_data)
+        
+        return f"Loaded Helpdesk Question CSV File in DataLake Tier2. : {year}/{month}/{day}"
+
+    def _insert_helpdesk_question_to_database(**context):
+        """
+        tier2 에 날짜별로 저장된 데이터를 읽어서 데이터베이스에 저장하는 함수입니다.
+        - hd : 헬프데스크
+        """
+        date = context['templates_dict']['prev_execution_date']
+        year, month, day = date[0:4], date[5:7], date[8:10]
+        
+        s3_key = f'aib-db/TSA_QUES_HI/{year}/{month}/{day}/{year}-{month}-{day}.csv'
+        s3_data = read_tier2_data(key=s3_key)
+
+        if s3_data == None :
+            return False
+        elif s3_data != None:
+            insert_csv_to_database('public.TSA_QUES_HI',s3_data)
+
+        return f"Inserted Helpdesk Question to Database. : {year}/{month}/{day}"
+        
     
-    for key in list_keys:
-        resp_json = S3_HOOK.read_key(key=key, bucket_name=TIER1_BUCKET)
-        resp_dict = json.loads(resp_json, encoding='utf-8-sig')
-        github_id = resp_dict['user']['id']
-        ind_id = get_pk_value('public.TSU_INDI','individual_id','github_id',github_id)
-        print("ind_id : ", ind_id)
-        type_tool_id = get_pk_value('public.TCA_TYPE_TO', 'type_tool_id', 'name', 'github')
-        csv_data.append( 
-                    [ind_id
-                    ,type_tool_id
-                    ,resp_dict['body']
-                    ,resp_dict['created_at']
-                    ,resp_dict['updated_at']]
-                    )
+    load_hd_data_to_tier2 = PythonOperator(
+        task_id = 'load_hd_data_to_tier2',
+        python_callable = _load_helpdesk_question_to_tier2,
+        templates_dict={
+            'prev_execution_date':"{{prev_execution_date}}"
+        },
+        inlets          = {
+            "datasets" : [
+                Dataset("s3",
+                        "s3://datalake-tier1-raw/aib/help-desk/"),
+                Dataset("postgres",
+                        "prod.public.tca_type_to")
+            ]
+        },
+        outlets         = {
+            "datasets" : [
+                Dataset("s3", "s3://datalake-tier2-staging/TSA_QUES_HI/")
+            ]
+        }
+    )
 
-    return csv_data
+    insert_hd_data_to_aib_db = PythonOperator(
+        task_id = 'insert_hd_data_to_aib_db',
+        python_callable = _insert_helpdesk_question_to_database,
+        templates_dict={
+            'prev_execution_date':"{{prev_execution_date}}"
+        },
+        inlets          = {
+            "datasets" : [
+                Dataset("s3", "s3://datalake-tier2-staging/TSA_QUES_HI/")
+            ]
+        },
+        outlets         = {
+            "datasets" : [
+                Dataset("postgres", "prod.public.tsa_ques_hi")
+            ]
+        }
+    )
 
-def read_tier2_data(key):
-    """
-    tier2 에 데이터가 저장되어 있는지 확인합니다.
-    """
-    s3_data = S3_HOOK.read_key(key=key, bucket_name=TIER2_BUCKET)
-    return s3_data
-
-
-def load_csv_tier2(s3_key, csv_data):
-    """
-    csv_data 를 데이터레이크 Tier 2에 적재합니다.
-    """
-
-    conn = S3_HOOK.get_conn()
-    with StringIO() as file:
-        csv_writer = csv.writer(file)
-        csv_writer.writerows(csv_data)
-        conn.put_object(Bucket=TIER2_BUCKET, Key=s3_key, Body=file.getvalue())
-    print('Success to load data')
-
-    return None
+    load_hd_data_to_tier2 >> insert_hd_data_to_aib_db
