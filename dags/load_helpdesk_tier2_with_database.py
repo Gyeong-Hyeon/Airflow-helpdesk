@@ -1,5 +1,5 @@
 """
-데이터레이크 Tier 1 에 저장되 데이터를 
+데이터레이크 Tier 1 에 저장된 데이터를 
 데이터레이크 Tier 2 와 데이터베이스에 저장합니다.
 """
 
@@ -111,4 +111,3 @@ with DAG(**dag_params) as dag:
     )
 
     load_hd_data_to_tier2 >> insert_hd_data_to_aib_db
-    
